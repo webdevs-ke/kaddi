@@ -1,0 +1,57 @@
+<canvas #gameCanvas width="900" height="600"></canvas>
+
+@if (!started) {
+
+  <!-- Player Count -->
+  <div>
+    <input
+      type="number"
+      [formControl]="playerCountControl"
+      min="2"
+      max="5"
+    />
+
+    @if (playerCountControl.invalid) {
+      <p>Players must be between 2 and 5</p>
+    }
+
+    <button (click)="setupPlayers()" [disabled]="playerCountControl.invalid">
+      OK
+    </button>
+  </div>
+
+}
+
+@if (enterNames) {
+
+  <div>
+    @for (ctrl of playerNames.controls; track $index) {
+      <div>
+        <input
+          [formControl]="ctrl"
+          placeholder="Player {{$index + 1}}"
+        />
+
+        @if (ctrl.invalid && ctrl.touched) {
+          <small>Name must be at least 2 characters</small>
+        }
+      </div>
+    }
+
+    <button
+      (click)="startGame()"
+      [disabled]="playerNames.invalid"
+    >
+      Start Game
+    </button>
+  </div>
+
+}
+
+@if (started) {
+  <button (click)="endTurn()">Next</button>
+
+    <div>
+      Turn: {{ currentPlayer.name }} | Time: {{ turnTime }}
+    </div>
+}
