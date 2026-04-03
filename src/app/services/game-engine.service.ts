@@ -1,21 +1,24 @@
 import { Injectable } from '@angular/core';
 import { Card } from '../models/card.model';
+import { isSameRankSequence } from '../utils/card-sequence';
 
 @Injectable({ providedIn: 'root' })
 export class GameEngine {
 
   /* ---------------- VALIDATION ---------------- */
+
   isValidSequence(
     cards: Card[],
-    flags: any
+    fsmCtxt: any
   ): boolean {
     if (!cards.length) return false;
 
+    const ranks: string[] = cards.map(c => c.rank);
     const first = cards[0];
 
     /* ---------------- QUESTION MODE ---------------- */
     
-    if (flags.questionSuit && flags.questionSuit !== undefined) {
+    if (fsmCtxt.questionSuit && fsmCtxt.questionSuit !== undefined) {
       const last = cards[cards.length - 1]; // check a hand card, if valid in sequence
       const isQuestion =
         last.rank === '8' || last.rank === 'Q';
@@ -25,52 +28,50 @@ export class GameEngine {
         // SAME RANK always allowed
         if (last.rank === cards[cards.length - 2].rank) return true;
         // SWITCH (8 - Q) MUST match suit
-        return last.suit === flags.questionSuit;
+        return last.suit === fsmCtxt.questionSuit;
       }
       
       // answering 
-      if (last.rank === 'A' || last.suit === flags.questionSuit) return true;
+      if (last.rank === 'A' || last.suit === fsmCtxt.questionSuit) return true;
 
-      return this.isSameRankSequence(cards);
+      return isSameRankSequence(ranks);
     }
 
     /* ---------------- PICKER MODE ---------------- */
-    if (flags.pickerStack > 0) {
+
+    if (fsmCtxt.pickerStack > 0) {
       // only allow same picker rank OR Ace
-      if (!(first.rank === flags.pickerRank || first.rank === 'A')) {
+      if (!(first.rank === fsmCtxt.pickerRank || first.rank === 'A')) {
         return false;
       }
 
       // multi-card: must all match first rank
-      return this.isSameRankSequence(cards);
+      return isSameRankSequence(ranks);
     }
 
     /* ---------------- REQUESTED SUIT (ACE EFFECT) ---------------- */
-    if (flags.requestedSuit) {
-      if (!(first.suit === flags.requestedSuit || first.rank === 'A')) {
+
+    if (fsmCtxt.requestedSuit) {
+      if (!(first.suit === fsmCtxt.requestedSuit || first.rank === 'A')) {
         return false;
       }
 
-      return this.isSameRankSequence(cards);
+      return isSameRankSequence(ranks);
     }
 
     /* ---------------- NORMAL RULES ---------------- */
 
     // first card must match top or be Ace
     const firstValid =
-      first.suit === flags.validSuit ||
-      first.rank === flags.validRank ||
+      first.suit === fsmCtxt.validSuit ||
+      first.rank === fsmCtxt.validRank ||
       first.rank === 'A';
 
     if (!firstValid) return false;
 
     // rest must match first card rank (multi-play rule)
-    return this.isSameRankSequence(cards);
+    return isSameRankSequence(ranks);
   }
 
   /* ---------------- HELPERS ---------------- */
-  private isSameRankSequence(cards: Card[]): boolean {
-    const rank = cards[0].rank;
-    return cards.every(c => c.rank === rank);
-  }
 }

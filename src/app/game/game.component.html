@@ -1,8 +1,8 @@
 <canvas #gameCanvas width="900" height="600"></canvas>
 
-@if (!started) {
+<!-- @if (!started) {
 
-  <!-- Player Count -->
+  
   <div>
     <input
       type="number"
@@ -20,9 +20,9 @@
     </button>
   </div>
 
-}
+} -->
 
-@if (enterNames) {
+<!-- @if (enterNames) {
 
   <div>
     @for (ctrl of playerNames.controls; track $index) {
@@ -46,7 +46,13 @@
     </button>
   </div>
 
-}
+} -->
+
+<button
+      (click)="startGame()"
+    >
+      Start Game
+</button>
 
 @if (started) {
   <button (click)="endTurn()">Next</button>

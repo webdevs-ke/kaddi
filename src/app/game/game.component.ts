@@ -16,7 +16,7 @@ import {
 import { createDeck } from '../utils/deck.util';
 import { shuffleDeck } from '../utils/shuffle.util';
 
-import { Card } from '../models/card.model';
+import { Card, CARD_WIDTH, CARD_HEIGHT } from '../models/card.model';
 import { Deck } from '../models/deck.model';
 import { Tableau } from '../models/tableau.model';
 import { Player } from '../models/player.model';
@@ -44,7 +44,8 @@ export class GameComponent implements AfterViewInit {
   tableau = new Tableau();
   players: Player[] = [];
 
-  turnTime = 15;
+  minDeck = 3;
+  turnTime = 30;
   timerInterval: any;
 
   // Forms
@@ -56,7 +57,7 @@ export class GameComponent implements AfterViewInit {
   playerNames = new FormArray<FormControl<string>>([]);
 
   // UI state
-  enterNames = false;
+  enterNames = true;
   started = false;
 
   animator = new Animator();
@@ -68,11 +69,15 @@ export class GameComponent implements AfterViewInit {
   dragX = 0;
   dragY = 0;
   dragOffsetX = 0;
-  dragOffsetY = 0;  
+  dragOffsetY = 0;
 
-  hoveringTableau = false;
+  hoveringTableau: boolean = false;
 
   pendingAce: boolean = false;
+
+  pendingKaddi: boolean = false;
+  gameOver: boolean = false;
+  gamesPlayed: number[] = [];
 
   ngAfterViewInit() {
     const canvas = this.canvasRef.nativeElement;
@@ -82,30 +87,71 @@ export class GameComponent implements AfterViewInit {
 
     canvas.addEventListener('mousedown', (e) => this.onMouseDown(e));
     canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
-    canvas.addEventListener('mouseup', (e) => this.onMouseUp(e));
+    canvas.addEventListener('mouseup', (e) => this.onMouseUp(e));    
   }
 
-  isValidTurnCard(card: Card): boolean {
+  isValidTurnCard(card: Card | null): boolean {
+    if (!card) return false;
+
     return this.fsm.isValidPlay(card);
   }
 
+  isPlayerKaddi(): boolean {
+    return this.currentPlayer.hand.getSize() === 1 && this.currentPlayer.isKaddi();
+  }
+
+  handlePendingKaddi() {
+    this.currentPlayer.kaddiState = true;
+    this.pendingKaddi = false;    
+  }
+
   /* ---------------- TIMER ---------------- */
-  startTurnTimer() {
+
+  startTimer(time: number) {
     clearInterval(this.timerInterval);
   
-    this.turnTime = 15;
+    this.turnTime = time;
   
     this.timerInterval = setInterval(() => {
       this.turnTime--;
   
       if (this.turnTime <= 0) {
-        clearInterval(this.timerInterval);
-        this.handleTimeout();
+        clearInterval(this.timerInterval);  
+        this.handleTimeout();              
       }
     }, 1000);
   }
 
+  startTurnTimer() {
+    const canDeal = this.currentPlayer.hand.toArray().some(c => this.isValidTurnCard(c)) ;
+
+    if (!canDeal) {
+      console.log(this.currentPlayer.name, 'cannot deal');
+
+      this.currentPlayer.kaddiState = false;
+      if (this.currentPlayer.hand.isEmpty()) {    
+
+        if (this.fsm.state !== 'PICKER_ACTIVE') {
+          const pick = this.deck.peek();
+          if (pick && ['4','5','6','7','9','10'].includes(pick.rank)) 
+            this.currentPlayer.kaddiState = true;
+        }
+      }
+      
+      this.startTimer(3);
+      return;
+    }
+  
+    this.startTimer(30);
+  }
+
   handleTimeout() {
+    this.resetDeck();
+
+    if (this.draggingCard) {
+      this.animateReturnToHand();  
+    }
+
     if (this.fsm.ctx.turnCards.length === 0) {
       // current player has not dealt
       const count =
@@ -113,15 +159,18 @@ export class GameComponent implements AfterViewInit {
           ? this.fsm.ctx.pickerStack
           : 1;
   
-      this.animatePickCards(count);      
+      this.animatePickCards(count);
     } else {
       if (this.fsm.state === 'QUESTION_ACTIVE') {
         // player has dealt question(s) without answer(s)
         this.animatePickCards(1);
       }
-    }    
+    }
+
+    if (this.pendingKaddi) this.handlePendingKaddi();
+
     this.fsm.dispatch({ type: 'TIMEOUT' });
-    this.startTurnTimer();    
+    this.startTurnTimer();
   }
 
   /* ---------------- INPUT ---------------- */
@@ -142,7 +191,7 @@ export class GameComponent implements AfterViewInit {
     );  
   
     // top-most first
-    for (let i = cards.length - 1; i >= 0; i--) {
+    for (let i = 0; i <= cards.length - 1; i++) {
       const card = cards[i];
   
       const cardX = pos.x - (cards.length * 10) + i * 20;
@@ -152,9 +201,9 @@ export class GameComponent implements AfterViewInit {
   
       const isInside =
         x >= cardX &&
-        x <= cardX + (i === cards.length - 1 ? 81 : visibleWidth) &&
+        x <= cardX + (i === cards.length - 1 ? CARD_WIDTH : visibleWidth) &&
         y >= cardY &&
-        y <= cardY + 117;
+        y <= cardY + CARD_HEIGHT;
   
       if (isInside && this.isValidTurnCard(card)) {  
         this.draggingCard = card;  
@@ -182,9 +231,9 @@ export class GameComponent implements AfterViewInit {
 
     this.hoveringTableau =
       x >= tx &&
-      x <= tx + 81 &&
+      x <= tx + CARD_WIDTH &&
       y >= ty &&
-      y <= ty + 117
+      y <= ty + CARD_HEIGHT
   }
 
   onMouseUp(event: MouseEvent) {
@@ -204,10 +253,10 @@ export class GameComponent implements AfterViewInit {
     const tx = this.centerX + 60;
     const ty = this.centerY - 60;
 
-    const dropped =
-      x >= tx && x <= tx + 81 && y >= ty && y <= ty + 117;
+    const dropped = 
+      x >= tx && x <= tx + CARD_WIDTH && y >= ty && y <= ty + CARD_HEIGHT;    
     
-    if (dropped && this.isValidTurnCard(this.draggingCard)) {
+    if (dropped && this.isValidTurnCard(this.draggingCard) && this.turnTime > 1) {      
       const card = this.draggingCard;
 
       this.animator.add(
@@ -219,11 +268,10 @@ export class GameComponent implements AfterViewInit {
           ty,
           () => this.completePlay(card)
         )
-      );
-    } else {
-      this.animateReturnToHand()
-    }
-    this.draggingCard = null;
+      );        
+    } else { // dragging card dropped elsewhere, not tableau | invalid | timeout
+      this.animateReturnToHand();
+    } 
   }
 
   /* ---------------- ACE ---------------- */
@@ -232,11 +280,12 @@ export class GameComponent implements AfterViewInit {
 
     suits.forEach((suit, i) => {
       const sx = this.centerX - 100 + i * 60;
-      const sy = this.centerY - 120;
+      const sy = this.centerY - 150;
 
       if (x >= sx && x <= sx + 30 && y >= sy && y <= sy + 30) {
+        this.currentPlayer.kaddiState = this.isPlayerKaddi() ? true : false;
         this.fsm.dispatch({ type: 'SELECT_SUIT', suit });
-        this.pendingAce = false;
+        this.pendingAce = false;        
         this.startTurnTimer();
       }
     });
@@ -250,16 +299,44 @@ export class GameComponent implements AfterViewInit {
   
     const isDeck =
       x >= dx &&
-      x <= dx + 81 &&
+      x <= dx + CARD_WIDTH &&
       y >= dy &&
-      y <= dy + 117;
+      y <= dy + CARD_HEIGHT;
   
     if (!isDeck) return;
 
     this.pickFromDeck();    
   }
 
+  resetDeck() {
+    if (this.deck.getSize() > this.minDeck) return;
+
+    const cards = this.deck.toArray();
+    const top = this.tableau.pop();          
+    if(!top || !cards.length) return;
+    
+    const newDeck = new Deck();
+    while(!this.tableau.isEmpty()) {
+      const card = this.tableau.pop();
+      if(!card) break;
+      
+      card.rotation = 0;
+      card.faceUp = false;
+      newDeck.push(card)
+    }
+    
+    this.tableau.push(top);    
+    shuffleDeck(newDeck);
+
+    for (let i=cards.length-1; i>=0; i--) {
+      newDeck.push(cards[i]);
+    }
+    
+    this.deck = newDeck;
+  }
+
   pickFromDeck() {
+    this.resetDeck();
     const isTarget =
       this.fsm.ctx.currentPlayerIndex === this.fsm.ctx.pickerTarget;
   
@@ -274,12 +351,14 @@ export class GameComponent implements AfterViewInit {
           : 1;
       
       this.animatePickCards(count);
+      this.currentPlayer.kaddiState = this.isPlayerKaddi() ? true : false;
       this.fsm.dispatch({ type: 'PICK' });
       this.startTurnTimer();
     } else {
       if (this.fsm.state === 'QUESTION_ACTIVE') {
         // player has dealt question(s) without answer(s)
         this.animatePickCards(1);
+        this.currentPlayer.kaddiState = this.isPlayerKaddi() ? true : false;
         this.fsm.dispatch({ type: 'PICK' });
         this.startTurnTimer();
       }
@@ -293,16 +372,68 @@ export class GameComponent implements AfterViewInit {
     player.hand.remove(card);
   
     card.faceUp = true;
-    card.rotation = (Math.random() - 0.5) * 0.5;
+    card.rotation = (Math.random() - 0.5) * 0.8;
   
     this.tableau.push(card);
+    this.draggingCard = null;
     this.hoveringTableau = false;
 
     this.fsm.dispatch({ type: 'PLAY_CARD', card });
+
+    if (this.fsm.state === 'ACE_SELECTION') {
+      this.pendingAce = true;
+      return;
+    }
+
+    if (player.hand.isEmpty()) {
+      if (this.won()) {        
+        this.restart(this.fsm.ctx.currentPlayerIndex);
+        return;
+      } 
+
+      if (this.fsm.state === 'QUESTION_ACTIVE') {
+        const pick = this.deck.peek();
+        if (pick && ['4','5','6','7','9','10'].includes(pick.rank)) 
+          player.kaddiState = true;
+      }
+
+      this.handleTimeout();
+      return;
+    }
+
+    if (this.isPlayerKaddi() && this.fsm.state !== 'QUESTION_ACTIVE') { 
+      if (!this.isValidTurnCard(player.hand.peek())) {
+        player.kaddiState = true;
+        this.handleTimeout();
+        return;
+      } else {
+        this.pendingKaddi = true;
+      }        
+    }
+
+    if (!player.hand.toArray().some(c => this.isValidTurnCard(c))) {
+      this.handleTimeout();
+      return;
+    }
+
     this.startTurnTimer();
   }
 
-  animateReturnToHand() {
+  won (): boolean {
+    if (!this.currentPlayer.kaddiState)
+      return false;
+
+    if(this.players.some(p => p.hand.isEmpty() && p !== this.currentPlayer)) 
+      return false;    
+
+    this.gamesPlayed.push(this.fsm.ctx.currentPlayerIndex);
+    this.gameOver = true;
+
+    return true;
+  }
+
+  animateReturnToHand () {
+    this.hoveringTableau = false;
     const player = this.currentPlayer;
     const cards = player.hand.toArray();
     const card = this.draggingCard;
@@ -331,6 +462,7 @@ export class GameComponent implements AfterViewInit {
         targetY
       )
     );
+    this.draggingCard = null;
   }
 
   getMousePos(event: MouseEvent) {
@@ -359,7 +491,7 @@ export class GameComponent implements AfterViewInit {
     let i = 0;
   
     const pickNext = () => {
-      if (i >= count) {
+      if (i >= count) {                
         return;
       }
   
@@ -417,6 +549,7 @@ export class GameComponent implements AfterViewInit {
   }
 
   endTurn() {
+    this.resetDeck();
     if (this.fsm.ctx.turnCards.length === 0) {
       // current player has not dealt
       const count =
@@ -431,6 +564,10 @@ export class GameComponent implements AfterViewInit {
         this.animatePickCards(1);        
       }
     }
+
+    if (this.pendingKaddi) this.handlePendingKaddi();
+    else this.currentPlayer.kaddiState = this.isPlayerKaddi() ? true : false;
+
     this.fsm.dispatch({ type: 'END_TURN' });
     this.startTurnTimer();    
     return;
@@ -513,7 +650,7 @@ export class GameComponent implements AfterViewInit {
     if (!card) return;
   
     card.faceUp = true;
-    card.rotation = (Math.random() - 0.5) * 0.5;
+    card.rotation = (Math.random() - 0.5) * 0.8;
   
     this.animator.add(
       new CardMoveAnimation(
@@ -528,18 +665,43 @@ export class GameComponent implements AfterViewInit {
       )
     );
     
-    if (card.rank !== 'A') {
-      this.fsm.ctx.validRank = card.rank;
-      this.fsm.ctx.validSuit = card.suit;
+    if (!this.fsm.isAce(card.rank)) {      
+      this.fsm.initValids({ suit: card.suit, rank: card.rank })
+    }
+
+    if (this.fsm.isPicker(card.rank)) {
+      this.fsm.initPicker(card.rank);
     }
   }
 
-  startGame() {
-    if (this.playerNames.invalid) return;
+  restart(winner: number) {    
+    this.animator.clear();
+    this.fsm.restart(winner);
 
-    this.players = this.playerNames.controls.map(
-      ctrl => new Player(ctrl.value)
-    );
+    this.turnTime = 30;
+    this.tableau = new Tableau();
+    this.started = false;
+    this.pendingAce = false;
+    this.players = [];
+    this.pendingKaddi = false;
+    this.gameOver = false;
+    this.startGame();
+  }
+
+  startGame() {
+    // if (this.playerNames.invalid) return;
+
+    // this.players = this.playerNames.controls.map(
+    //   ctrl => new Player(ctrl.value)
+    // );
+
+    if (this.started) {
+      this.restart(this.gamesPlayed.length ? this.gamesPlayed[this.gamesPlayed.length - 1] : 0);
+      return;
+    } 
+    
+    this.players.push(new Player("DROID"));
+    this.players.push(new Player("BEN.K"));        
 
     this.fsm.setPlayersCount(this.players.length);
     this.deck = createDeck();
@@ -547,8 +709,9 @@ export class GameComponent implements AfterViewInit {
     this.animateShuffle(() => {
       this.dealCardsAnimated();      
     });
-
+    
     this.started = true;
+    return;
   }
 
   getSuitSymbol(name: string) {
@@ -578,7 +741,7 @@ export class GameComponent implements AfterViewInit {
   
     if (!(this.fsm.state === 'QUESTION_ACTIVE') && this.fsm.ctx.turnCards.length > 0) {
       ctx.fillStyle = 'rgba(0,0,0,0.4)';
-      ctx.fillRect(this.centerX - 40, this.centerY - 60, 81, 117);
+      ctx.fillRect(this.centerX - 40, this.centerY - 60, CARD_WIDTH, CARD_HEIGHT);
     }
 
     if (this.fsm.state === 'QUESTION_ACTIVE') {
@@ -643,6 +806,11 @@ export class GameComponent implements AfterViewInit {
       ctx.font = '16px Arial';
       ctx.textAlign = 'center';
       ctx.fillText(player.name || `P${i + 1}`, pos.x, pos.y);
+
+      ctx.fillStyle = 'black';
+      ctx.font = '18px Serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(player.kaddiState ? 'KADDI' : '', pos.x + 100, pos.y);
   
       // ⏱️ Draw timer for current player
       if (i === this.fsm.ctx.currentPlayerIndex) {
@@ -658,7 +826,7 @@ export class GameComponent implements AfterViewInit {
       const handCards = player.hand.toArray();
   
       handCards.forEach((card, j) => {
-        // ❌ Skip dragged card
+        // Skip dragged card
         if (card === this.draggingCard) return;
 
         card.faceUp = true; // or hide opponents' later
@@ -671,10 +839,19 @@ export class GameComponent implements AfterViewInit {
             i === this.fsm.ctx.currentPlayerIndex && this.isValidTurnCard(card);
 
         if (isPlayable) {
-          ctx.strokeStyle = 'yellow';
-          ctx.strokeRect(cardX, cardY, 81, 117);
+          ctx.strokeStyle = 'rgba(0,255,255,0.3)';
+          ctx.strokeRect(cardX, cardY, CARD_WIDTH, CARD_HEIGHT);
+          ctx.fillStyle = 'rgba(0,0,0,0.3)';
+          ctx.fillRect(cardX, cardY, CARD_WIDTH, CARD_HEIGHT);
         }
       });
+
+      if (this.started && !handCards.length) {
+        ctx.strokeStyle = 'rgba(78,35,255,0.5)';
+        ctx.strokeRect(pos.x, pos.y + 10, CARD_WIDTH, CARD_HEIGHT);
+        ctx.fillStyle = 'rgba(255,35,12,0.3)';
+        ctx.fillRect(pos.x, pos.y + 10, CARD_WIDTH, CARD_HEIGHT);
+      }
     });
     
     if (this.draggingCard) {
@@ -696,6 +873,31 @@ export class GameComponent implements AfterViewInit {
   }
 
   drawAceSelection() {
+    const ctx = this.ctx;
+  
+    const suits = ['♥', '♠', '♦', '♣'];
+  
+    const startX = this.centerX - 100;
+    const startY = this.centerY - 150;
+  
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(startX - 20, startY - 40, 240, 120);
+  
+    ctx.fillStyle = 'white';
+    ctx.font = '16px Arial';
+    ctx.fillText('Choose Suit', startX + 60, startY - 10);
+  
+    suits.forEach((suit, i) => {
+      const x = startX + i * 60;
+      const y = startY + 20;
+  
+      ctx.fillStyle = 'white';
+      ctx.font = '30px Arial';
+      ctx.fillText(suit, x, y);
+    });
+  }
+
+  drawKaddiSelection() {
     const ctx = this.ctx;
   
     const suits = ['♥', '♠', '♦', '♣'];

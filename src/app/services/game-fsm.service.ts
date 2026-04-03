@@ -55,10 +55,6 @@ export class GameFSM {
   playersCount = 2;
   isGameStart: boolean = true;
 
-  setPlayersCount(count: number) {
-    this.playersCount = count;
-  }
-
   /* ---------------- VALIDATION ---------------- */
   isValidPlay(card: Card): boolean {
     const sequence = [...this.ctx.turnCards, card];
@@ -75,7 +71,7 @@ export class GameFSM {
 
   /* ---------------- DISPATCH ---------------- */
   dispatch(event: GameEvent) {
-    // Handle card accumulation centrally
+    // Handle card accumulation during turn
     if (event.type === 'PLAY_CARD') {
       this.ctx.turnCards.push(event.card);
 
@@ -99,36 +95,34 @@ export class GameFSM {
   /* ---------------- NORMAL ---------------- */
   private normal(event: GameEvent) {
     if (event.type === 'PLAY_CARD') {
-      const card = event.card;
+      const c = event.card;
 
       // QUESTION
-      if (card.rank === '8' || card.rank === 'Q') {
-        this.ctx.questionSuit = card.suit;
+      if (this.isQuestion(c.rank)) {
+        this.ctx.questionSuit = c.suit;
         this.state = 'QUESTION_ACTIVE';
         return;
       }
 
       // PICKER
-      if (card.rank === '2' || card.rank === '3') {
-        this.ctx.pickerStack = parseInt(card.rank);
-        this.ctx.pickerRank = card.rank as any;
+      if (this.isPicker(c.rank)) {
+        this.ctx.pickerStack = parseInt(c.rank);
+        this.ctx.pickerRank = c.rank as any;
 
-        this.ctx.pickerTarget = this.isGameStart
-          ? this.ctx.currentPlayerIndex
-          : this.nextIndex();
+        this.ctx.pickerTarget = this.nextIndex();
 
         this.state = 'PICKER_ACTIVE';
         return;
       }
 
       // ACE
-      if (card.rank === 'A') {
+      if (this.isAce(c.rank)) {
         this.state = 'ACE_SELECTION';
         return;
       }
 
       // KICKBACK
-      if (card.rank === 'K') {
+      if (this.isKickback(c.rank)) {
         this.ctx.kickbackCount = 1;
         this.state = 'KICKBACK_CHAIN';
         return;
@@ -146,24 +140,29 @@ export class GameFSM {
     if (event.type === 'PLAY_CARD') {
       const c = event.card;
 
-      if (c.rank === '8' || c.rank === 'Q') return; // continue dealing
+      if (this.isQuestion(c.rank)) {
+        // question dealt, change question suit, continue dealing
+        this.ctx.questionSuit = c.suit;
+        return;
+      } 
 
-      if (c.rank === 'A') {
+      if (this.isAce(c.rank)) {
         this.ctx.questionSuit = undefined;
         this.state = 'ACE_SELECTION'; // continue playing - handle suit selection
         return;
       }
 
-      if (c.suit === this.ctx.questionSuit) {
+      if (this.isAnswer({ suit: c.suit, rank: c.rank })) { // answer dealt
         this.state = 'NORMAL_TURN';
         this.ctx.questionSuit = undefined;
 
-        if (c.rank === '2' || c.rank === '3') {
+        if (this.isPicker(c.rank)) {
           this.ctx.pickerStack = parseInt(c.rank);
           this.ctx.pickerTarget = this.nextIndex();
           this.state = 'PICKER_ACTIVE';
         }
         // continue dealing
+        this.ctx.turnCards = [c]
         return;
       }
     }
@@ -176,18 +175,19 @@ export class GameFSM {
   }
 
   /* ---------------- PICKER ---------------- */
+
   private picker(event: GameEvent) {
     if (event.type === 'PLAY_CARD') {
       const c = event.card;
 
-      if (c.rank === '2' || c.rank === '3') {
+      if (this.isPicker(c.rank)) {
         this.ctx.pickerStack = parseInt(c.rank);
         this.ctx.pickerTarget = this.nextIndex();
         // continue dealing
         return;
       }
 
-      if (c.rank === 'A') {
+      if (this.isAce(c.rank)) {
         // neutralize picker, valid suit & rank don't change (same as picker's)
         this.ctx.pickerStack = 0;
         this.ctx.pickerTarget = undefined;
@@ -222,7 +222,7 @@ export class GameFSM {
   /* ---------------- KICKBACK ---------------- */
   private kickback(event: GameEvent) {
     if (event.type === 'PLAY_CARD') {
-      if (event.card.rank === 'K') {
+      if (this.isKickback(event.card.rank)) {
         this.ctx.kickbackCount++;
         if (this.ctx.kickbackCount % 2 === 0) {
           // even number kickbacks, turn restarts
@@ -266,5 +266,62 @@ export class GameFSM {
     return (
       (this.ctx.currentPlayerIndex + this.ctx.direction + t) % t
     );
+  }
+
+  setPlayersCount(count: number) {
+    this.playersCount = count;
+  }
+
+  initValids(c: any) {
+    this.ctx.validRank = c.rank;
+    this.ctx.validSuit = c.suit;
+  }
+
+  initPicker(rank: string) {
+    this.ctx.pickerStack = parseInt(rank);
+    this.ctx.pickerRank = rank as any;
+
+    this.ctx.pickerTarget = this.ctx.currentPlayerIndex;
+
+    this.state = 'PICKER_ACTIVE';
+  }
+
+  restart (winner: number = 0) {
+    this.state = 'NORMAL_TURN';
+    this.isGameStart = true;
+
+    this.ctx = {
+      validSuit: '', 
+      validRank: '',
+      currentPlayerIndex: winner,
+      direction: 1,
+      pickerStack: 0,
+      kickbackCount: 0,
+      turnCards: []
+    };
+  }
+
+  isAce(rank: string): boolean {
+    return rank === 'A'
+  }
+
+  isPicker(rank: string): boolean {
+    return rank === '2' || rank === '3'
+  }
+
+  isJump(rank: string): boolean {
+    return rank === 'J'
+  }
+
+  isKickback(rank: string): boolean {
+    return rank === 'K'
+  }
+
+  isQuestion(rank: string): boolean {
+    return rank === 'Q' || rank === '8'
+  }
+
+  isAnswer(c: any): boolean {
+    return !this.isQuestion(c.rank) && c.suit === this.ctx.questionSuit
   }
 }
