@@ -75,7 +75,6 @@ export class GameComponent implements AfterViewInit {
 
   pendingAce: boolean = false;
 
-  pendingKaddi: boolean = false;
   gameOver: boolean = false;
   gamesPlayed: number[] = [];
 
@@ -96,13 +95,19 @@ export class GameComponent implements AfterViewInit {
     return this.fsm.isValidPlay(card);
   }
 
-  isPlayerKaddi(): boolean {
-    return this.currentPlayer.hand.getSize() === 1 && this.currentPlayer.isKaddi();
+  hasDealt(): boolean {
+    return (this.fsm.ctx.turnCards.length > 0);
   }
 
-  handlePendingKaddi() {
-    this.currentPlayer.kaddiState = true;
-    this.pendingKaddi = false;    
+  canDeal(): boolean {
+    return (this.currentPlayer.hand.toArray().some(c => this.isValidTurnCard(c)))
+  }
+
+  isPlayerKaddi(): boolean {
+    return (this.fsm.state !== 'QUESTION_ACTIVE' && 
+            this.currentPlayer.hand.getSize() === 1 && 
+            this.currentPlayer.isKaddi()
+    );
   }
 
   /* ---------------- TIMER ---------------- */
@@ -121,28 +126,16 @@ export class GameComponent implements AfterViewInit {
       }
     }, 1000);
   }
-
-  startTurnTimer() {
-    const canDeal = this.currentPlayer.hand.toArray().some(c => this.isValidTurnCard(c)) ;
-
-    if (!canDeal) {
-      console.log(this.currentPlayer.name, 'cannot deal');
-
-      this.currentPlayer.kaddiState = false;
-      if (this.currentPlayer.hand.isEmpty()) {    
-
-        if (this.fsm.state !== 'PICKER_ACTIVE') {
-          const pick = this.deck.peek();
-          if (pick && ['4','5','6','7','9','10'].includes(pick.rank)) 
-            this.currentPlayer.kaddiState = true;
-        }
-      }
-      
-      this.startTimer(3);
-      return;
-    }
   
-    this.startTimer(30);
+  startTurnTimer() {
+    this.currentPlayer.kaddiState = this.isPlayerKaddi();
+
+    if (this.canDeal()) {
+      this.startTimer(30);
+
+    } else {
+      this.startTimer(3);
+    }
   }
 
   handleTimeout() {
@@ -152,8 +145,8 @@ export class GameComponent implements AfterViewInit {
       this.animateReturnToHand();  
     }
 
-    if (this.fsm.ctx.turnCards.length === 0) {
-      // current player has not dealt
+    if (!this.hasDealt()) {
+      // new player has not dealt, pick
       const count =
         this.fsm.state === 'PICKER_ACTIVE'
           ? this.fsm.ctx.pickerStack
@@ -162,12 +155,12 @@ export class GameComponent implements AfterViewInit {
       this.animatePickCards(count);
     } else {
       if (this.fsm.state === 'QUESTION_ACTIVE') {
-        // player has dealt question(s) without answer(s)
+        // current player has dealt question(s) without answer(s)
         this.animatePickCards(1);
       }
     }
 
-    if (this.pendingKaddi) this.handlePendingKaddi();
+    this.currentPlayer.kaddiState = this.isPlayerKaddi();
 
     this.fsm.dispatch({ type: 'TIMEOUT' });
     this.startTurnTimer();
@@ -303,7 +296,7 @@ export class GameComponent implements AfterViewInit {
       y >= dy &&
       y <= dy + CARD_HEIGHT;
   
-    if (!isDeck) return;
+    if (!isDeck || this.turnTime <= 1) return;
 
     this.pickFromDeck();    
   }
@@ -337,28 +330,29 @@ export class GameComponent implements AfterViewInit {
 
   pickFromDeck() {
     this.resetDeck();
+
     const isTarget =
       this.fsm.ctx.currentPlayerIndex === this.fsm.ctx.pickerTarget;
   
     // block illegal pick
     if (this.fsm.state === 'PICKER_ACTIVE' && !isTarget) return;
   
-    if (this.fsm.ctx.turnCards.length === 0) {
-      // current player has not dealt
+    if (!this.hasDealt()) {
+      // new player has not dealt
       const count =
         this.fsm.state === 'PICKER_ACTIVE'
           ? this.fsm.ctx.pickerStack
           : 1;
       
       this.animatePickCards(count);
-      this.currentPlayer.kaddiState = this.isPlayerKaddi() ? true : false;
+      this.currentPlayer.kaddiState = this.isPlayerKaddi();
       this.fsm.dispatch({ type: 'PICK' });
       this.startTurnTimer();
     } else {
       if (this.fsm.state === 'QUESTION_ACTIVE') {
-        // player has dealt question(s) without answer(s)
+        // current player has dealt question(s) without answer(s)
         this.animatePickCards(1);
-        this.currentPlayer.kaddiState = this.isPlayerKaddi() ? true : false;
+        this.currentPlayer.kaddiState = this.isPlayerKaddi();
         this.fsm.dispatch({ type: 'PICK' });
         this.startTurnTimer();
       }
@@ -380,39 +374,13 @@ export class GameComponent implements AfterViewInit {
 
     this.fsm.dispatch({ type: 'PLAY_CARD', card });
 
+    if (this.won()) {        
+      this.restart(this.fsm.ctx.currentPlayerIndex);
+      return;
+    }
+
     if (this.fsm.state === 'ACE_SELECTION') {
       this.pendingAce = true;
-      return;
-    }
-
-    if (player.hand.isEmpty()) {
-      if (this.won()) {        
-        this.restart(this.fsm.ctx.currentPlayerIndex);
-        return;
-      } 
-
-      if (this.fsm.state === 'QUESTION_ACTIVE') {
-        const pick = this.deck.peek();
-        if (pick && ['4','5','6','7','9','10'].includes(pick.rank)) 
-          player.kaddiState = true;
-      }
-
-      this.handleTimeout();
-      return;
-    }
-
-    if (this.isPlayerKaddi() && this.fsm.state !== 'QUESTION_ACTIVE') { 
-      if (!this.isValidTurnCard(player.hand.peek())) {
-        player.kaddiState = true;
-        this.handleTimeout();
-        return;
-      } else {
-        this.pendingKaddi = true;
-      }        
-    }
-
-    if (!player.hand.toArray().some(c => this.isValidTurnCard(c))) {
-      this.handleTimeout();
       return;
     }
 
@@ -420,7 +388,7 @@ export class GameComponent implements AfterViewInit {
   }
 
   won (): boolean {
-    if (!this.currentPlayer.kaddiState)
+    if (!this.currentPlayer.hand.isEmpty() || !this.currentPlayer.kaddiState)
       return false;
 
     if(this.players.some(p => p.hand.isEmpty() && p !== this.currentPlayer)) 
@@ -491,7 +459,7 @@ export class GameComponent implements AfterViewInit {
     let i = 0;
   
     const pickNext = () => {
-      if (i >= count) {                
+      if (i >= count) {                     
         return;
       }
   
@@ -549,27 +517,7 @@ export class GameComponent implements AfterViewInit {
   }
 
   endTurn() {
-    this.resetDeck();
-    if (this.fsm.ctx.turnCards.length === 0) {
-      // current player has not dealt
-      const count =
-        this.fsm.state === 'PICKER_ACTIVE'
-          ? this.fsm.ctx.pickerStack
-          : 1;
-  
-      this.animatePickCards(count);
-    } else {
-      if (this.fsm.state === 'QUESTION_ACTIVE') {
-        // player has dealt question(s) without answer(s)
-        this.animatePickCards(1);        
-      }
-    }
-
-    if (this.pendingKaddi) this.handlePendingKaddi();
-    else this.currentPlayer.kaddiState = this.isPlayerKaddi() ? true : false;
-
-    this.fsm.dispatch({ type: 'END_TURN' });
-    this.startTurnTimer();    
+    this.handleTimeout();
     return;
   }
 
@@ -683,7 +631,6 @@ export class GameComponent implements AfterViewInit {
     this.started = false;
     this.pendingAce = false;
     this.players = [];
-    this.pendingKaddi = false;
     this.gameOver = false;
     this.startGame();
   }
@@ -810,7 +757,7 @@ export class GameComponent implements AfterViewInit {
       ctx.fillStyle = 'black';
       ctx.font = '18px Serif';
       ctx.textAlign = 'right';
-      ctx.fillText(player.kaddiState ? 'KADDI' : '', pos.x + 100, pos.y);
+      ctx.fillText((player.kaddiState && player.hand.getSize() === 1) ? 'KADDI' : '', pos.x + 100, pos.y);
   
       // ⏱️ Draw timer for current player
       if (i === this.fsm.ctx.currentPlayerIndex) {

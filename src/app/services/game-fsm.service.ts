@@ -7,6 +7,7 @@ export type GameState =
   | 'QUESTION_ACTIVE'
   | 'PICKER_ACTIVE'
   | 'ACE_SELECTION'
+  | 'JUMP_ACTIVE'
   | 'KICKBACK_CHAIN';
 
 interface GameContext {
@@ -23,10 +24,10 @@ interface GameContext {
   pickerTarget?: number;
 
   requestedSuit?: string;
-
+  jumpCount: number;
   kickbackCount: number;
 
-  turnCards: Card[]; // track cards played this turn
+  turnCards: Card[]; // tracks cards played this turn
 }
 
 type GameEvent =
@@ -48,6 +49,7 @@ export class GameFSM {
     currentPlayerIndex: 0,
     direction: 1,
     pickerStack: 0,
+    jumpCount: 0,
     kickbackCount: 0,
     turnCards: []
   };
@@ -88,6 +90,7 @@ export class GameFSM {
       case 'QUESTION_ACTIVE': return this.question(event);
       case 'PICKER_ACTIVE': return this.picker(event);
       case 'ACE_SELECTION': return this.ace(event);
+      case 'JUMP_ACTIVE': return this.jump(event);
       case 'KICKBACK_CHAIN': return this.kickback(event);
     }
   }
@@ -120,6 +123,13 @@ export class GameFSM {
         this.state = 'ACE_SELECTION';
         return;
       }
+      
+      // JUMP
+      if (this.isJump(c.rank)) {
+        this.ctx.jumpCount = 1;
+        this.state = 'JUMP_ACTIVE';
+        return;
+      }     
 
       // KICKBACK
       if (this.isKickback(c.rank)) {
@@ -250,6 +260,24 @@ export class GameFSM {
     }
   }
 
+  /* ---------------- JUMP ---------------- */
+  private jump(event: GameEvent) {
+    if (event.type === 'PLAY_CARD') {
+      if (this.isJump(event.card.rank)) {
+        this.ctx.jumpCount++;
+      }
+    }
+
+    if (event.type === 'PICK' || event.type === 'TIMEOUT' || event.type === 'END_TURN') {        
+      if (this.ctx.jumpCount === 0) {
+        this.state = 'NORMAL_TURN';        
+      } else {
+        this.ctx.jumpCount--;
+      }
+      this.advanceTurn();    
+    }
+  }
+
   /* ---------------- HELPERS ---------------- */
   private advanceTurn() {
     const t = this.playersCount;
@@ -297,6 +325,7 @@ export class GameFSM {
       direction: 1,
       pickerStack: 0,
       kickbackCount: 0,
+      jumpCount: 0,
       turnCards: []
     };
   }

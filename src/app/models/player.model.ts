@@ -15,7 +15,7 @@ export class Player {
     const kaddiRanks = ['4','5','6','7','9','10'];
     const cards = this.hand.toArray();
 
-    return kaddiRanks.includes(cards[0].rank) && isSameRankSequence(cards.map(c => c.rank));
+    return (kaddiRanks.includes(cards[0].rank) && isSameRankSequence(cards.map(c => c.rank)));
   }
 
   set kaddiState (kaddi: boolean) {
