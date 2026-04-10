@@ -49,6 +49,18 @@ export class GameEngine {
       return isSameRankSequence(ranks);
     }
 
+    /* ---------------- JUMP MODE ---------------- */
+
+    if (fsmCtxt.jumpCount > 0) {
+      // only allow J
+      if (first.rank !== 'J') {
+        return false;
+      }
+
+      // multi-card: must all match first rank
+      return isSameRankSequence(ranks);
+    }
+
     /* ---------------- REQUESTED SUIT (ACE EFFECT) ---------------- */
 
     if (fsmCtxt.requestedSuit) {
@@ -72,6 +84,4 @@ export class GameEngine {
     // rest must match first card rank (multi-play rule)
     return isSameRankSequence(ranks);
   }
-
-  /* ---------------- HELPERS ---------------- */
 }

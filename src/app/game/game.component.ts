@@ -146,13 +146,15 @@ export class GameComponent implements AfterViewInit {
     }
 
     if (!this.hasDealt()) {
-      // new player has not dealt, pick
-      const count =
-        this.fsm.state === 'PICKER_ACTIVE'
-          ? this.fsm.ctx.pickerStack
-          : 1;
+      // new player has not dealt, pick OR get jumped
+      if (this.fsm.state !== 'JUMP_ACTIVE') {
+        const count =
+          this.fsm.state === 'PICKER_ACTIVE'
+            ? this.fsm.ctx.pickerStack
+            : 1;
   
-      this.animatePickCards(count);
+        this.animatePickCards(count);
+      }      
     } else {
       if (this.fsm.state === 'QUESTION_ACTIVE') {
         // current player has dealt question(s) without answer(s)
@@ -339,15 +341,18 @@ export class GameComponent implements AfterViewInit {
   
     if (!this.hasDealt()) {
       // new player has not dealt
-      const count =
-        this.fsm.state === 'PICKER_ACTIVE'
-          ? this.fsm.ctx.pickerStack
-          : 1;
+      if (this.fsm.state !== 'JUMP_ACTIVE') {
+        const count =
+          this.fsm.state === 'PICKER_ACTIVE'
+            ? this.fsm.ctx.pickerStack
+            : 1;
+        
+        this.animatePickCards(count);
+        this.currentPlayer.kaddiState = this.isPlayerKaddi();
+        this.fsm.dispatch({ type: 'PICK' });
+        this.startTurnTimer();
+      }
       
-      this.animatePickCards(count);
-      this.currentPlayer.kaddiState = this.isPlayerKaddi();
-      this.fsm.dispatch({ type: 'PICK' });
-      this.startTurnTimer();
     } else {
       if (this.fsm.state === 'QUESTION_ACTIVE') {
         // current player has dealt question(s) without answer(s)
@@ -393,6 +398,9 @@ export class GameComponent implements AfterViewInit {
 
     if(this.players.some(p => p.hand.isEmpty() && p !== this.currentPlayer)) 
       return false;    
+
+    if (this.fsm.ctx.turnCards.length !== 1)
+      return false;
 
     this.gamesPlayed.push(this.fsm.ctx.currentPlayerIndex);
     this.gameOver = true;
@@ -686,7 +694,8 @@ export class GameComponent implements AfterViewInit {
       drawCard(ctx, card, cx - 40 + i * 0.5, cy - 60 + i * 0.5);
     });
   
-    if (!(this.fsm.state === 'QUESTION_ACTIVE') && this.fsm.ctx.turnCards.length > 0) {
+    if ((this.fsm.state !== 'QUESTION_ACTIVE' && this.fsm.ctx.turnCards.length) || 
+        (this.fsm.state === 'JUMP_ACTIVE' && !this.fsm.ctx.turnCards.length)) {
       ctx.fillStyle = 'rgba(0,0,0,0.4)';
       ctx.fillRect(this.centerX - 40, this.centerY - 60, CARD_WIDTH, CARD_HEIGHT);
     }

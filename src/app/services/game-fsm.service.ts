@@ -99,7 +99,7 @@ export class GameFSM {
   private normal(event: GameEvent) {
     if (event.type === 'PLAY_CARD') {
       const c = event.card;
-
+      
       // QUESTION
       if (this.isQuestion(c.rank)) {
         this.ctx.questionSuit = c.suit;
@@ -263,7 +263,7 @@ export class GameFSM {
   /* ---------------- JUMP ---------------- */
   private jump(event: GameEvent) {
     if (event.type === 'PLAY_CARD') {
-      if (this.isJump(event.card.rank)) {
+      if (this.isJump(event.card.rank)) {     
         this.ctx.jumpCount++;
       }
     }
@@ -351,6 +351,6 @@ export class GameFSM {
   }
 
   isAnswer(c: any): boolean {
-    return !this.isQuestion(c.rank) && c.suit === this.ctx.questionSuit
+    return (!this.isQuestion(c.rank) && c.suit === this.ctx.questionSuit)
   }
 }
